@@ -1,0 +1,21 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "SpotifySongrequest",
+  "outputfilename": "SpotifySongrequest",
+  "frontend": {
+    "dir": "frontend",
+    "installCommand": "",
+    "buildCommand": "",
+    "devCommand": ""
+  },
+  "info": {
+    "productName": "Spotify Songrequest",
+    "productVersion": "1.0.0",
+    "copyright": "romestylez",
+    "comments": "Spotify Song Request API for Twitch"
+  },
+  "author": {
+    "name": "romestylez",
+    "email": ""
+  }
+}

@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spotify Songrequest</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #0d0f14;
+  --surface: #13161d;
+  --border: #1e2330;
+  --accent: #6c8cff;
+  --text: #c8cdd8;
+  --text-dim: #5a6175;
+  --text-bright: #e8ecf4;
+  --green: #1db954;
+  --red: #ff6b6b;
+}
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  height: 100vh;
+  overflow-y: auto;
+}
+.wrap { max-width: 640px; margin: 0 auto; padding: 20px 20px 32px; }
+h1 {
+  font-size: 17px;
+  color: var(--text-bright);
+  margin-bottom: 18px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 18px;
+  margin-bottom: 12px;
+}
+.section-header {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  margin-bottom: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.section-title { display: flex; align-items: center; gap: 8px; }
+.optional { font-size: 11px; color: var(--text-dim); font-weight: 400; text-transform: none; letter-spacing: 0; }
+.status-badge {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 20px;
+  background: #1e2330;
+  color: var(--text-dim);
+}
+.status-badge.connected { background: #0d2818; color: var(--green); }
+.field { margin-bottom: 10px; }
+.field label {
+  display: block;
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+input[type="text"], input[type="number"], input[type="password"] {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: var(--text-bright);
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+input:focus { border-color: var(--accent); }
+input::placeholder { color: var(--text-dim); }
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.btn:hover { background: var(--border); color: var(--text-bright); }
+.btn:disabled { opacity: 0.38; cursor: default; pointer-events: none; }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 500; }
+.btn-primary:hover { background: #8099ff; border-color: #8099ff; }
+.btn-connect { background: rgba(29,185,84,0.08); border-color: rgba(29,185,84,0.3); color: var(--green); }
+.btn-connect:hover { background: rgba(29,185,84,0.15); }
+.row { display: flex; gap: 8px; margin-top: 12px; }
+.actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }
+.port-note { font-size: 11px; color: var(--text-dim); margin-top: 6px; }
+.port-note code { color: var(--accent); font-family: 'Consolas', monospace; font-size: 12px; }
+.toast {
+  position: fixed;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 9px 16px;
+  font-size: 13px;
+  opacity: 0;
+  transition: opacity 0.2s;
+  pointer-events: none;
+  z-index: 100;
+  white-space: nowrap;
+}
+.toast.show { opacity: 1; }
+.toast.ok { border-color: var(--green); color: var(--green); }
+.toast.err { border-color: var(--red); color: var(--red); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <!-- Songrequest -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-title">Songrequest</div>
+      <span class="status-badge" id="status-main">nicht verbunden</span>
+    </div>
+    <div class="field">
+      <label>Client ID</label>
+      <input type="text" id="main-client-id" placeholder="Spotify Client ID" oninput="onDirty(); updateConnectButtons()"/>
+    </div>
+    <div class="field">
+      <label>Client Secret</label>
+      <input type="text" id="main-client-secret" placeholder="Spotify Client Secret" oninput="onDirty(); updateConnectButtons()"/>
+    </div>
+    <div class="row">
+      <button class="btn btn-connect" id="btn-connect-main" onclick="connect('main')" disabled>&#128279; Mit Spotify verbinden</button>
+    </div>
+  </div>
+
+  <!-- Autoclear -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-title">
+        Autoclear
+        <span class="optional">(optional)</span>
+      </div>
+      <span class="status-badge" id="status-ac">nicht verbunden</span>
+    </div>
+    <div class="field">
+      <label>Client ID</label>
+      <input type="text" id="ac-client-id" placeholder="Spotify Client ID" oninput="onDirty(); updateConnectButtons()"/>
+    </div>
+    <div class="field">
+      <label>Client Secret</label>
+      <input type="text" id="ac-client-secret" placeholder="Spotify Client Secret" oninput="onDirty(); updateConnectButtons()"/>
+    </div>
+    <div class="row">
+      <button class="btn btn-connect" id="btn-connect-ac" onclick="connect('autoclear')" disabled>&#128279; Mit Spotify verbinden</button>
+    </div>
+  </div>
+
+  <!-- Playlist -->
+  <div class="section">
+    <div class="section-header">Playlist</div>
+    <div class="field">
+      <label>Songrequest Playlist ID</label>
+      <input type="text" id="playlist-id" placeholder="Spotify Playlist ID" oninput="onDirty()"/>
+    </div>
+    <div class="field">
+      <label>Favoriten Playlist ID</label>
+      <input type="text" id="fav-playlist-id" placeholder="Spotify Playlist ID" oninput="onDirty()"/>
+    </div>
+  </div>
+
+  <!-- Server -->
+  <div class="section">
+    <div class="section-header">Server</div>
+    <div class="field">
+      <label>Port</label>
+      <input type="number" id="server-port" placeholder="8765" min="1024" max="65535" oninput="onDirty(); updatePort()"/>
+    </div>
+    <p class="port-note">Redirect URI f&#252;r Spotify Developer Dashboard: <code id="redirect-uri">http://127.0.0.1:8765/callback</code></p>
+  </div>
+
+  <div class="actions">
+    <button class="btn btn-primary" id="btn-save" onclick="save()" disabled>Einstellungen speichern</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+var dirty = false;
+var mainSecretSet = false, acSecretSet = false;
+var mainConnected = false, acConnected = false;
+
+function onDirty() {
+  dirty = true;
+  document.getElementById('btn-save').disabled = false;
+}
+
+function updateConnectButtons() {
+  var mainId = document.getElementById('main-client-id').value.trim();
+  var mainSecret = document.getElementById('main-client-secret').value.trim();
+  var acId = document.getElementById('ac-client-id').value.trim();
+  var acSecret = document.getElementById('ac-client-secret').value.trim();
+
+  var mainOk = mainId !== '' && (mainSecret !== '' || mainSecretSet);
+  var acOk = acId !== '' && (acSecret !== '' || acSecretSet);
+
+  document.getElementById('btn-connect-main').disabled = !mainOk || mainConnected;
+  document.getElementById('btn-connect-ac').disabled = !acOk || acConnected;
+}
+
+function updatePort() {
+  var port = document.getElementById('server-port').value || '8765';
+  document.getElementById('redirect-uri').textContent = 'http://127.0.0.1:' + port + '/callback';
+}
+
+function showToast(msg, type) {
+  var t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show' + (type ? ' ' + type : '');
+  setTimeout(function() { t.className = 'toast'; }, 3000);
+}
+
+function loadSettings() {
+  window.go.main.App.GetSettings().then(function(cfg) {
+    document.getElementById('main-client-id').value = cfg.spotify_main.client_id || '';
+    document.getElementById('ac-client-id').value = cfg.spotify_autoclear.client_id || '';
+    document.getElementById('playlist-id').value = cfg.playlist_id || '';
+    document.getElementById('fav-playlist-id').value = cfg.fav_playlist_id || '';
+    document.getElementById('server-port').value = cfg.server_port || 8765;
+    updatePort();
+
+    var smSecret = document.getElementById('main-client-secret');
+    smSecret.value = '';
+    smSecret.placeholder = cfg.spotify_main.secret_set
+      ? '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022 (gesetzt)'
+      : 'Spotify Client Secret';
+
+    var acSecret = document.getElementById('ac-client-secret');
+    acSecret.value = '';
+    acSecret.placeholder = cfg.spotify_autoclear.secret_set
+      ? '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022 (gesetzt)'
+      : 'Spotify Client Secret';
+
+    mainSecretSet = cfg.spotify_main.secret_set || false;
+    acSecretSet = cfg.spotify_autoclear.secret_set || false;
+    mainConnected = cfg.spotify_main.connected || false;
+    acConnected = cfg.spotify_autoclear.connected || false;
+
+    var smStatus = document.getElementById('status-main');
+    smStatus.textContent = mainConnected ? '\u2713 verbunden' : 'nicht verbunden';
+    smStatus.className = 'status-badge' + (mainConnected ? ' connected' : '');
+
+    var acStatus = document.getElementById('status-ac');
+    acStatus.textContent = acConnected ? '\u2713 verbunden' : 'nicht verbunden';
+    acStatus.className = 'status-badge' + (acConnected ? ' connected' : '');
+
+    updateConnectButtons();
+    dirty = false;
+    document.getElementById('btn-save').disabled = true;
+  }).catch(function() {
+    showToast('\u2715 Fehler beim Laden', 'err');
+  });
+}
+
+function getFormInput() {
+  return {
+    server_port: parseInt(document.getElementById('server-port').value) || 8765,
+    main_client_id: document.getElementById('main-client-id').value,
+    main_client_secret: document.getElementById('main-client-secret').value,
+    ac_client_id: document.getElementById('ac-client-id').value,
+    ac_client_secret: document.getElementById('ac-client-secret').value,
+    playlist_id: document.getElementById('playlist-id').value,
+    fav_playlist_id: document.getElementById('fav-playlist-id').value
+  };
+}
+
+function save() {
+  window.go.main.App.SaveSettings(getFormInput()).then(function() {
+    showToast('\u2713 Gespeichert', 'ok');
+    loadSettings();
+  }).catch(function(err) {
+    showToast('\u2715 ' + err, 'err');
+  });
+}
+
+function connect(appType) {
+  window.go.main.App.SaveSettings(getFormInput()).then(function() {
+    return window.go.main.App.OpenLogin(appType);
+  }).catch(function(err) {
+    showToast('\u2715 ' + err, 'err');
+  });
+}
+
+// Reload settings after successful OAuth
+window.runtime.EventsOn('oauth:success', function() {
+  showToast('\u2713 Spotify verbunden!', 'ok');
+  loadSettings();
+});
+
+window.addEventListener('load', loadSettings);
+</script>
+</body>
+</html>
