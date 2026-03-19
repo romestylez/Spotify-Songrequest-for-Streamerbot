@@ -15,19 +15,25 @@ type TrackState struct {
 }
 
 type AutoclearState struct {
-	Tracks map[string]*TrackState `json:"tracks"`
+	Tracks         map[string]*TrackState `json:"tracks"`
+	LastCurrID     string                 `json:"last_curr_id"`
+	LastIdx        int                    `json:"last_idx"`
+	LastTotal      int                    `json:"last_total"`
+	LastProgressMs int64                  `json:"last_progress_ms"`
+	LastDurationMs int64                  `json:"last_duration_ms"`
 }
 
 const autoclearStateFile = "autoclear_state.json"
+const nearEndPadMs = 20000
 
 func LoadAutoclearState() *AutoclearState {
 	data, err := os.ReadFile(autoclearStateFile)
 	if err != nil {
-		return &AutoclearState{Tracks: map[string]*TrackState{}}
+		return &AutoclearState{Tracks: map[string]*TrackState{}, LastIdx: -1}
 	}
 	var state AutoclearState
 	if err := json.Unmarshal(data, &state); err != nil {
-		return &AutoclearState{Tracks: map[string]*TrackState{}}
+		return &AutoclearState{Tracks: map[string]*TrackState{}, LastIdx: -1}
 	}
 	if state.Tracks == nil {
 		state.Tracks = map[string]*TrackState{}
@@ -58,7 +64,6 @@ func doAutoclear(client *AppClient, cfg *Config, dryRun bool) error {
 		return nil
 	}
 
-	// Get current playback state
 	playback, err := client.GetPlaybackState()
 	if err != nil {
 		return fmt.Errorf("playback state: %w", err)
@@ -68,11 +73,15 @@ func doAutoclear(client *AppClient, cfg *Config, dryRun bool) error {
 
 	// Rule C: No active player → no deletions
 	if playback == nil {
+		state.LastCurrID = ""
+		state.LastIdx = -1
+		_ = SaveAutoclearState(state)
 		return nil
 	}
 
-	// Update max progress for current track
 	trackID := playback.TrackID
+
+	// Update max progress for current track
 	if trackID != "" {
 		ts, ok := state.Tracks[trackID]
 		if !ok {
@@ -85,13 +94,13 @@ func doAutoclear(client *AppClient, cfg *Config, dryRun bool) error {
 		}
 	}
 
-	// Get current playlist to find track index
 	tracks, err := client.GetPlaylistTracks(cfg.PlaylistID)
 	if err != nil {
 		return fmt.Errorf("get playlist tracks: %w", err)
 	}
 
-	// Find current track index in playlist
+	total := len(tracks)
+
 	currentIndex := -1
 	for i, t := range tracks {
 		if t.TrackID == trackID {
@@ -113,25 +122,41 @@ func doAutoclear(client *AppClient, cfg *Config, dryRun bool) error {
 			toDelete = append(toDelete, DeleteTrack{URI: uri, Positions: positions})
 		}
 	} else if !playback.IsPlaying && playback.Progress == 0 && currentIndex == 0 {
-		// Rule B: Paused at position 0 with 0ms progress
-		// Only delete if previous track was nearly complete (within 20s of end)
-		// We check using the state of what was previously playing
-		shouldDelete := false
-		for id, ts := range state.Tracks {
-			if id != trackID && ts.MaxProgress >= ts.Duration-20000 {
-				shouldDelete = true
-				break
-			}
+		// Rule B: Paused at position 0 with 0ms progress → check for end-wrap
+		// Only delete if the previously observed track was at the last position
+		// AND had progress near its end (within 20s buffer)
+		lastIdx := state.LastIdx
+		lastTotal := state.LastTotal
+		lastDurMs := state.LastDurationMs
+		lastProgMs := state.LastProgressMs
+
+		var threshold int64
+		if lastDurMs-nearEndPadMs > 0 {
+			threshold = lastDurMs - nearEndPadMs
 		}
-		if shouldDelete && len(tracks) > 1 {
-			log.Printf("[autoclear] Rule B: end-wrap detected, deleting previous tracks")
-			// We don't know exactly which was "previous", so check all before current
-			// (currentIndex==0, so nothing before it — this handles wrap-around after last track played)
-			// Actually for Rule B we rely on the fact the track wrapped to position 0
-			// The previous track was at the end and finished — it's already gone from playlist
-			// This rule primarily guards against false positives on pause
+		hadNearEnd := lastDurMs > 0 && lastProgMs >= threshold
+		wasAtLast := lastIdx >= 0 && lastTotal > 0 && lastIdx == lastTotal-1
+
+		if wasAtLast && hadNearEnd {
+			log.Printf("[autoclear] Rule B: end-wrap confirmed, deleting all %d tracks", total)
+			byURI := map[string][]int{}
+			for i, t := range tracks {
+				byURI[t.URI] = append(byURI[t.URI], i)
+			}
+			for uri, positions := range byURI {
+				toDelete = append(toDelete, DeleteTrack{URI: uri, Positions: positions})
+			}
+		} else {
+			log.Printf("[autoclear] Rule B: paused at start, no end-wrap confirmed (lastIdx=%d, lastTotal=%d, lastProg=%d, lastDur=%d)", lastIdx, lastTotal, lastProgMs, lastDurMs)
 		}
 	}
+
+	// Update last-seen state for next cycle
+	state.LastCurrID = trackID
+	state.LastIdx = currentIndex
+	state.LastTotal = total
+	state.LastProgressMs = playback.Progress
+	state.LastDurationMs = playback.Duration
 
 	if len(toDelete) == 0 {
 		_ = SaveAutoclearState(state)
@@ -157,15 +182,11 @@ func doAutoclear(client *AppClient, cfg *Config, dryRun bool) error {
 
 	// Clean up state for deleted tracks
 	for _, dt := range toDelete {
-		trackIDFromURI := ""
 		for _, t := range tracks {
 			if t.URI == dt.URI {
-				trackIDFromURI = t.TrackID
+				delete(state.Tracks, t.TrackID)
 				break
 			}
-		}
-		if trackIDFromURI != "" {
-			delete(state.Tracks, trackIDFromURI)
 		}
 	}
 
